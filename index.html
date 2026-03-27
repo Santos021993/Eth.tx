@@ -18,10 +18,10 @@
 <input id="contract" placeholder="0x..." value="0x0000000000000000000000000000000000000805">
 
 <label>Hotkey (bytes32)</label>
-<input id="hotkey" placeholder="0x...64 hex chars">
+<input id="hotkey" placeholder="0x...">
 
-<label>Amount (TAO)</label>
-<input id="amount" placeholder="1">
+<label>Amount (RAO)</label>
+<input id="amount" placeholder="1000000000">
 
 <label>NetUID (Subnet ID)</label>
 <input id="netuid" placeholder="0">
@@ -32,9 +32,6 @@
 
 <script>
 let contract, signer;
-
-// 1 TAO = 1e9 plancks
-const TAO_DECIMALS = 1_000_000_000;
 
 async function connect() {
   if (!window.ethereum) {
@@ -59,39 +56,40 @@ async function connect() {
 
 async function addStake() {
   const hotkey = document.getElementById("hotkey").value;
-  const amountTAO = document.getElementById("amount").value;
-  const netuid = parseInt(document.getElementById("netuid").value);
+  const amount = document.getElementById("amount").value;
+  const netuid = document.getElementById("netuid").value;
 
-  if (!hotkey || !amountTAO || isNaN(netuid)) { alert("Fill all fields correctly!"); return; }
+  if (!hotkey || !amount || netuid === "") { alert("Fill all fields!"); return; }
+  if (hotkey.length !== 66 || !hotkey.startsWith("0x")) { alert("Hotkey must be 32 bytes hex!"); return; }
 
   try {
-    const amountPlanck = BigInt(amountTAO) * BigInt(TAO_DECIMALS);
-    const tx = await contract.addStake(hotkey, amountPlanck, netuid, { gasLimit: 1_000_000 });
+    // amount wpisujesz dokładnie w RAO, bez konwersji
+    const tx = await contract.addStake(hotkey, BigInt(amount), parseInt(netuid), { gasLimit: 1000000 });
     console.log("TX:", tx.hash);
     await tx.wait();
     alert("Stake successful ✅");
   } catch (err) {
     console.error(err);
-    alert("Error staking! Check console for details.");
+    alert("Error staking! Sprawdź hotkey i amount.");
   }
 }
 
 async function removeStake() {
   const hotkey = document.getElementById("hotkey").value;
-  const amountTAO = document.getElementById("amount").value;
-  const netuid = parseInt(document.getElementById("netuid").value);
+  const amount = document.getElementById("amount").value;
+  const netuid = document.getElementById("netuid").value;
 
-  if (!hotkey || !amountTAO || isNaN(netuid)) { alert("Fill all fields correctly!"); return; }
+  if (!hotkey || !amount || netuid === "") { alert("Fill all fields!"); return; }
+  if (hotkey.length !== 66 || !hotkey.startsWith("0x")) { alert("Hotkey must be 32 bytes hex!"); return; }
 
   try {
-    const amountPlanck = BigInt(amountTAO) * BigInt(TAO_DECIMALS);
-    const tx = await contract.removeStake(hotkey, amountPlanck, netuid, { gasLimit: 1_000_000 });
+    const tx = await contract.removeStake(hotkey, BigInt(amount), parseInt(netuid), { gasLimit: 1000000 });
     console.log("TX:", tx.hash);
     await tx.wait();
     alert("Unstake successful ✅");
   } catch (err) {
     console.error(err);
-    alert("Error unstaking! Check console for details.");
+    alert("Error unstaking! Sprawdź hotkey i amount.");
   }
 }
 
