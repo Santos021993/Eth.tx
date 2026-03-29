@@ -46,9 +46,10 @@
     transition: opacity 0.2s;
   }
   button:hover { opacity: 0.85; }
-  #connect { background: #238636; color: white; }
-  #stake   { background: #1f6feb; color: white; }
-  #unstake { background: #b62324; color: white; }
+  #connect    { background: #238636; color: white; }
+  #stake      { background: #1f6feb; color: white; }
+  #unstake    { background: #b62324; color: white; }
+  #unstakeFull { background: #6e2c2c; color: white; }
   #status {
     margin-top: 18px;
     padding: 12px;
@@ -62,6 +63,8 @@
   #status.err  { background: #2d0f0f; border: 1px solid #b62324; color: #f85149; }
   #status.info { background: #0d1f33; border: 1px solid #1f6feb; color: #58a6ff; }
   .note { font-size: 12px; color: #8b949e; margin-top: 4px; }
+  .divider { border: none; border-top: 1px solid #21262d; margin: 20px 0 6px; }
+  .section-label { font-size: 11px; color: #6e7681; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -75,7 +78,7 @@
 <input id="hotkey" placeholder="0x56a9aee6291bd03ab6d36d4d13e2bebae7cd403518066c72fba1b417d6ddd748">
 <div class="note">Konwertuj SS58 → public key hex na ss58.org</div>
 
-<label>Amount (RAO)</label>
+<label>Amount (RAO) — nie wymagane dla Remove Full</label>
 <input id="amount" placeholder="1000000000">
 <div class="note">1 TAO = 1 000 000 000 RAO &nbsp;|&nbsp; 0.01 TAO = 10 000 000 RAO</div>
 
@@ -84,8 +87,14 @@
 
 <div class="buttons">
   <button id="connect">🔌 Connect MetaMask</button>
+</div>
+
+<hr class="divider">
+<div class="section-label">Stake</div>
+<div class="buttons">
   <button id="stake">➕ Add Stake</button>
   <button id="unstake">➖ Remove Stake</button>
+  <button id="unstakeFull">🗑️ Remove Stake FULL</button>
 </div>
 
 <div id="status"></div>
@@ -94,7 +103,6 @@
 let contract = null;
 let signer = null;
 
-// Oficjalne ABI z opentensor/subtensor stakingV2.abi
 const ABI = [
   {
     "inputs": [
@@ -114,6 +122,16 @@ const ABI = [
       {"internalType": "uint256", "name": "netuid", "type": "uint256"}
     ],
     "name": "removeStake",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "bytes32", "name": "hotkey", "type": "bytes32"},
+      {"internalType": "uint256", "name": "netuid", "type": "uint256"}
+    ],
+    "name": "removeStakeFull",
     "outputs": [],
     "stateMutability": "payable",
     "type": "function"
@@ -147,10 +165,11 @@ async function connect() {
 
     const userAddr = await signer.getAddress();
     const network = await provider.getNetwork();
+    const chainOk = network.chainId.toString() === "964";
     showStatus(
       "✅ Połączono: " + userAddr +
       "\nSieć: Chain ID " + network.chainId.toString() +
-      (network.chainId.toString() !== "964" ? "\n⚠️ Uwaga: oczekiwano Chain ID 964 (Bittensor)" : " ✅"),
+      (chainOk ? " ✅" : "\n⚠️ Uwaga: oczekiwano Chain ID 964 (Bittensor)!"),
       "ok"
     );
   } catch (err) {
@@ -159,28 +178,13 @@ async function connect() {
   }
 }
 
-async function doStake(isAdd) {
-  if (!contract || !signer) {
-    showStatus("❌ Najpierw połącz MetaMask!", "err");
-    return;
-  }
-
+function getInputs(requireAmount) {
   const hotkey = document.getElementById("hotkey").value.trim();
-  const amountRaw = document.getElementById("amount").value.trim();
   const netuidRaw = document.getElementById("netuid").value.trim();
 
   if (!validateHotkey(hotkey)) {
     showStatus("❌ Hotkey musi być: 0x + 64 znaki hex.\nSkonwertuj SS58 na ss58.org", "err");
-    return;
-  }
-
-  let amount;
-  try {
-    amount = BigInt(amountRaw);
-    if (amount <= 0n) throw new Error();
-  } catch {
-    showStatus("❌ Amount musi być liczbą całkowitą np. 1000000000", "err");
-    return;
+    return null;
   }
 
   let netuid;
@@ -189,26 +193,33 @@ async function doStake(isAdd) {
     if (netuid < 0n) throw new Error();
   } catch {
     showStatus("❌ NetUID musi być nieujemną liczbą całkowitą np. 0", "err");
-    return;
+    return null;
   }
 
+  if (requireAmount) {
+    const amountRaw = document.getElementById("amount").value.trim();
+    let amount;
+    try {
+      amount = BigInt(amountRaw);
+      if (amount <= 0n) throw new Error();
+    } catch {
+      showStatus("❌ Amount musi być liczbą całkowitą np. 1000000000", "err");
+      return null;
+    }
+    return { hotkey, amount, netuid };
+  }
+
+  return { hotkey, netuid };
+}
+
+async function sendTx(txPromise, label) {
   try {
-    showStatus("⏳ Wysyłanie transakcji... Zatwierdź w MetaMask.", "info");
-
-    const tx = isAdd
-      ? await contract.addStake(hotkey, amount, netuid)
-      : await contract.removeStake(hotkey, amount, netuid);
-
+    showStatus("⏳ " + label + "... Zatwierdź w MetaMask.", "info");
+    const tx = await txPromise;
     showStatus("⏳ TX wysłany!\nHash: " + tx.hash + "\n\nCzekam na potwierdzenie...", "info");
     console.log("TX hash:", tx.hash);
-
     const receipt = await tx.wait();
-    showStatus(
-      "✅ " + (isAdd ? "Stake dodany!" : "Stake usunięty!") +
-      "\nTX: " + tx.hash +
-      "\nBlok: " + receipt.blockNumber,
-      "ok"
-    );
+    showStatus("✅ " + label + " — sukces!\nTX: " + tx.hash + "\nBlok: " + receipt.blockNumber, "ok");
   } catch (err) {
     console.error("FULL ERROR:", JSON.stringify(err, null, 2));
     const msg = err?.info?.error?.message
@@ -221,9 +232,31 @@ async function doStake(isAdd) {
   }
 }
 
-document.getElementById("connect").onclick = connect;
-document.getElementById("stake").onclick   = () => doStake(true);
-document.getElementById("unstake").onclick = () => doStake(false);
+async function addStake() {
+  if (!contract || !signer) { showStatus("❌ Najpierw połącz MetaMask!", "err"); return; }
+  const inputs = getInputs(true);
+  if (!inputs) return;
+  await sendTx(contract.addStake(inputs.hotkey, inputs.amount, inputs.netuid), "Add Stake");
+}
+
+async function removeStake() {
+  if (!contract || !signer) { showStatus("❌ Najpierw połącz MetaMask!", "err"); return; }
+  const inputs = getInputs(true);
+  if (!inputs) return;
+  await sendTx(contract.removeStake(inputs.hotkey, inputs.amount, inputs.netuid), "Remove Stake");
+}
+
+async function removeStakeFull() {
+  if (!contract || !signer) { showStatus("❌ Najpierw połącz MetaMask!", "err"); return; }
+  const inputs = getInputs(false);
+  if (!inputs) return;
+  await sendTx(contract.removeStakeFull(inputs.hotkey, inputs.netuid), "Remove Stake FULL");
+}
+
+document.getElementById("connect").onclick    = connect;
+document.getElementById("stake").onclick      = addStake;
+document.getElementById("unstake").onclick    = removeStake;
+document.getElementById("unstakeFull").onclick = removeStakeFull;
 </script>
 </body>
 </html>
