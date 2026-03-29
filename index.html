@@ -54,9 +54,10 @@
     border-radius: 6px;
     font-size: 13px;
     display: none;
+    word-break: break-all;
   }
-  #status.ok  { background: #0f2d1a; border: 1px solid #238636; color: #3fb950; }
-  #status.err { background: #2d0f0f; border: 1px solid #b62324; color: #f85149; }
+  #status.ok   { background: #0f2d1a; border: 1px solid #238636; color: #3fb950; }
+  #status.err  { background: #2d0f0f; border: 1px solid #b62324; color: #f85149; }
   #status.info { background: #0d1f33; border: 1px solid #1f6feb; color: #58a6ff; }
   .note { font-size: 12px; color: #8b949e; margin-top: 4px; }
 </style>
@@ -90,9 +91,10 @@
 let contract = null;
 let signer = null;
 
+// POPRAWNE ABI — netuid jako uint256 (nie uint32!), kolejność: hotkey, amount, netuid
 const ABI = [
-  "function addStake(bytes32 hotkey, uint256 amount, uint32 netUID) external",
-  "function removeStake(bytes32 hotkey, uint256 amount, uint32 netUID) external"
+  "function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
+  "function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external"
 ];
 
 function showStatus(msg, type = "info") {
@@ -139,43 +141,42 @@ async function doStake(isAdd) {
   const netuidRaw = document.getElementById("netuid").value.trim();
 
   if (!validateHotkey(hotkey)) {
-    showStatus("❌ Hotkey musi być: 0x + 64 znaki hex (32 bajty). Skonwertuj SS58 na ss58.org", "err");
+    showStatus("❌ Hotkey musi być: 0x + 64 znaki hex. Skonwertuj SS58 na ss58.org", "err");
     return;
   }
 
   let amount;
   try {
     amount = BigInt(amountRaw);
-    if (amount <= 0n) throw new Error("amount <= 0");
+    if (amount <= 0n) throw new Error();
   } catch {
     showStatus("❌ Amount musi być liczbą całkowitą, np. 1000000000", "err");
     return;
   }
 
-  const netuid = parseInt(netuidRaw);
-  if (isNaN(netuid) || netuid < 0) {
-    showStatus("❌ NetUID musi być nieujemną liczbą całkowitą", "err");
+  let netuid;
+  try {
+    netuid = BigInt(netuidRaw);
+    if (netuid < 0n) throw new Error();
+  } catch {
+    showStatus("❌ NetUID musi być nieujemną liczbą całkowitą, np. 0", "err");
     return;
   }
 
   try {
     showStatus("⏳ Wysyłanie transakcji... Zatwierdź w MetaMask.", "info");
 
-    let tx;
-    if (isAdd) {
-      tx = await contract.addStake(hotkey, amount, netuid);
-    } else {
-      tx = await contract.removeStake(hotkey, amount, netuid);
-    }
+    const tx = isAdd
+      ? await contract.addStake(hotkey, amount, netuid)
+      : await contract.removeStake(hotkey, amount, netuid);
 
-    showStatus("⏳ TX wysłany: " + tx.hash + " — czekam na potwierdzenie...", "info");
+    showStatus("⏳ TX wysłany: " + tx.hash + "\nCzekam na potwierdzenie...", "info");
     console.log("TX hash:", tx.hash);
 
     await tx.wait();
-    showStatus("✅ " + (isAdd ? "Stake dodany" : "Stake usunięty") + "! TX: " + tx.hash, "ok");
+    showStatus("✅ " + (isAdd ? "Stake dodany!" : "Stake usunięty!") + "\nTX: " + tx.hash, "ok");
   } catch (err) {
     console.error(err);
-    // Wyciągamy czytelny komunikat
     const msg = err?.info?.error?.message
               || err?.data?.message
               || err?.shortMessage
