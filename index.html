@@ -5,94 +5,189 @@
 <title>TAO Stake UI</title>
 <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.0/dist/ethers.umd.min.js"></script>
 <style>
-  body { font-family: Arial; padding: 20px; max-width: 500px; margin: auto; }
-  input { width: 100%; margin-bottom: 10px; padding: 8px; }
-  button { padding: 10px 20px; margin-right: 10px; }
-  label { font-weight: bold; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: Arial, sans-serif;
+    background: #0d1117;
+    color: #e6edf3;
+    padding: 30px 20px;
+    max-width: 520px;
+    margin: auto;
+  }
+  h2 { color: #58a6ff; margin-bottom: 24px; }
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: bold;
+    color: #8b949e;
+    margin-bottom: 4px;
+    margin-top: 14px;
+  }
+  input {
+    width: 100%;
+    padding: 10px 12px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #e6edf3;
+    font-size: 14px;
+    outline: none;
+  }
+  input:focus { border-color: #58a6ff; }
+  .buttons { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+  button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    transition: opacity 0.2s;
+  }
+  button:hover { opacity: 0.85; }
+  #connect { background: #238636; color: white; }
+  #stake   { background: #1f6feb; color: white; }
+  #unstake { background: #b62324; color: white; }
+  #status {
+    margin-top: 18px;
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    display: none;
+  }
+  #status.ok  { background: #0f2d1a; border: 1px solid #238636; color: #3fb950; }
+  #status.err { background: #2d0f0f; border: 1px solid #b62324; color: #f85149; }
+  #status.info { background: #0d1f33; border: 1px solid #1f6feb; color: #58a6ff; }
+  .note { font-size: 12px; color: #8b949e; margin-top: 4px; }
 </style>
 </head>
 <body>
-<h2>TAO Stake UI</h2>
+<h2>⚡ TAO Stake UI</h2>
 
 <label>Contract Address</label>
-<input id="contract" placeholder="0x..." value="0x0000000000000000000000000000000000000805">
+<input id="contract" value="0x0000000000000000000000000000000000000805">
 
-<label>Hotkey (bytes32, hex)</label>
-<input id="hotkey" placeholder="0x...">
+<label>Hotkey (bytes32 — public key hex)</label>
+<input id="hotkey" placeholder="0x56a9aee6291bd03ab6d36d4d13e2bebae7cd403518066c72fba1b417d6ddd748">
+<div class="note">Konwertuj SS58 → public key hex na ss58.org</div>
 
 <label>Amount (RAO)</label>
-<input id="amount" placeholder="1000000000"> <!-- 1 TAO = 1 000 000 000 RAO -->
+<input id="amount" placeholder="1000000000">
+<div class="note">1 TAO = 1 000 000 000 RAO &nbsp;|&nbsp; 0.01 TAO = 10 000 000 RAO</div>
 
 <label>NetUID (Subnet ID)</label>
-<input id="netuid" placeholder="0">
+<input id="netuid" placeholder="0" value="0">
 
-<button id="connect">Connect MetaMask</button>
-<button id="stake">Add Stake</button>
-<button id="unstake">Remove Stake</button>
+<div class="buttons">
+  <button id="connect">🔌 Connect MetaMask</button>
+  <button id="stake">➕ Add Stake</button>
+  <button id="unstake">➖ Remove Stake</button>
+</div>
+
+<div id="status"></div>
 
 <script>
-let contract, signer;
+let contract = null;
+let signer = null;
 
-async function connect() {
-  if (!window.ethereum) { alert("MetaMask not detected!"); return; }
+const ABI = [
+  "function addStake(bytes32 hotkey, uint256 amount, uint32 netUID) external",
+  "function removeStake(bytes32 hotkey, uint256 amount, uint32 netUID) external"
+];
 
-  const provider = new ethers.BrowserProvider(window.ethereum);
-  await provider.send("eth_requestAccounts", []);
-  signer = await provider.getSigner();
-
-  const contractAddress = document.getElementById("contract").value;
-  contract = new ethers.Contract(
-    contractAddress,
-    [
-      "function addStake(bytes32 hotkey, uint256 amount, uint32 netUID)",
-      "function removeStake(bytes32 hotkey, uint256 amount, uint32 netUID)"
-    ],
-    signer
-  );
-  alert("MetaMask connected ✅");
+function showStatus(msg, type = "info") {
+  const el = document.getElementById("status");
+  el.textContent = msg;
+  el.className = type;
+  el.style.display = "block";
 }
 
-async function addStake() {
-  const hotkey = document.getElementById("hotkey").value;
-  const amountInput = document.getElementById("amount").value;
-  const netuid = document.getElementById("netuid").value;
+function validateHotkey(hotkey) {
+  return /^0x[0-9a-fA-F]{64}$/.test(hotkey);
+}
 
-  if (!hotkey || !amountInput || netuid === "") { alert("Fill all fields!"); return; }
-
+async function connect() {
+  if (!window.ethereum) {
+    showStatus("❌ MetaMask nie wykryty!", "err");
+    return;
+  }
   try {
-    const amount = BigInt(amountInput); // teraz RAO, 1 TAO = 1 000 000 000
-    const tx = await contract.addStake(hotkey, amount, parseInt(netuid), { gasLimit: 1000000 });
-    console.log("TX hash:", tx.hash);
-    await tx.wait();
-    alert("Stake successful ✅");
+    showStatus("Łączenie z MetaMask...", "info");
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    signer = await provider.getSigner();
+
+    const addr = document.getElementById("contract").value.trim();
+    contract = new ethers.Contract(addr, ABI, signer);
+
+    const userAddr = await signer.getAddress();
+    showStatus("✅ Połączono: " + userAddr, "ok");
   } catch (err) {
     console.error(err);
-    alert("Error staking! Check hotkey and amount.");
+    showStatus("❌ Błąd połączenia: " + err.message, "err");
   }
 }
 
-async function removeStake() {
-  const hotkey = document.getElementById("hotkey").value;
-  const amountInput = document.getElementById("amount").value;
-  const netuid = document.getElementById("netuid").value;
+async function doStake(isAdd) {
+  if (!contract || !signer) {
+    showStatus("❌ Najpierw połącz MetaMask!", "err");
+    return;
+  }
 
-  if (!hotkey || !amountInput || netuid === "") { alert("Fill all fields!"); return; }
+  const hotkey = document.getElementById("hotkey").value.trim();
+  const amountRaw = document.getElementById("amount").value.trim();
+  const netuidRaw = document.getElementById("netuid").value.trim();
+
+  if (!validateHotkey(hotkey)) {
+    showStatus("❌ Hotkey musi być: 0x + 64 znaki hex (32 bajty). Skonwertuj SS58 na ss58.org", "err");
+    return;
+  }
+
+  let amount;
+  try {
+    amount = BigInt(amountRaw);
+    if (amount <= 0n) throw new Error("amount <= 0");
+  } catch {
+    showStatus("❌ Amount musi być liczbą całkowitą, np. 1000000000", "err");
+    return;
+  }
+
+  const netuid = parseInt(netuidRaw);
+  if (isNaN(netuid) || netuid < 0) {
+    showStatus("❌ NetUID musi być nieujemną liczbą całkowitą", "err");
+    return;
+  }
 
   try {
-    const amount = BigInt(amountInput);
-    const tx = await contract.removeStake(hotkey, amount, parseInt(netuid), { gasLimit: 1000000 });
+    showStatus("⏳ Wysyłanie transakcji... Zatwierdź w MetaMask.", "info");
+
+    let tx;
+    if (isAdd) {
+      tx = await contract.addStake(hotkey, amount, netuid);
+    } else {
+      tx = await contract.removeStake(hotkey, amount, netuid);
+    }
+
+    showStatus("⏳ TX wysłany: " + tx.hash + " — czekam na potwierdzenie...", "info");
     console.log("TX hash:", tx.hash);
+
     await tx.wait();
-    alert("Unstake successful ✅");
+    showStatus("✅ " + (isAdd ? "Stake dodany" : "Stake usunięty") + "! TX: " + tx.hash, "ok");
   } catch (err) {
     console.error(err);
-    alert("Error unstaking! Check hotkey and amount.");
+    // Wyciągamy czytelny komunikat
+    const msg = err?.info?.error?.message
+              || err?.data?.message
+              || err?.shortMessage
+              || err?.message
+              || "Nieznany błąd";
+    showStatus("❌ Błąd: " + msg, "err");
   }
 }
 
 document.getElementById("connect").onclick = connect;
-document.getElementById("stake").onclick = addStake;
-document.getElementById("unstake").onclick = removeStake;
+document.getElementById("stake").onclick   = () => doStake(true);
+document.getElementById("unstake").onclick = () => doStake(false);
 </script>
 </body>
 </html>
