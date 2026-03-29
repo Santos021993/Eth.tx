@@ -14,7 +14,8 @@
     max-width: 520px;
     margin: auto;
   }
-  h2 { color: #58a6ff; margin-bottom: 24px; }
+  h2 { color: #58a6ff; margin-bottom: 6px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
   label {
     display: block;
     font-size: 13px;
@@ -55,6 +56,7 @@
     font-size: 13px;
     display: none;
     word-break: break-all;
+    white-space: pre-wrap;
   }
   #status.ok   { background: #0f2d1a; border: 1px solid #238636; color: #3fb950; }
   #status.err  { background: #2d0f0f; border: 1px solid #b62324; color: #f85149; }
@@ -64,6 +66,7 @@
 </head>
 <body>
 <h2>⚡ TAO Stake UI</h2>
+<div class="subtitle">Bittensor EVM Staking Precompile V2 — 0x...0805</div>
 
 <label>Contract Address</label>
 <input id="contract" value="0x0000000000000000000000000000000000000805">
@@ -91,10 +94,30 @@
 let contract = null;
 let signer = null;
 
-// POPRAWNE ABI — netuid jako uint256 (nie uint32!), kolejność: hotkey, amount, netuid
+// Oficjalne ABI z opentensor/subtensor stakingV2.abi
 const ABI = [
-  "function addStake(bytes32 hotkey, uint256 amount, uint256 netuid) external",
-  "function removeStake(bytes32 hotkey, uint256 amount, uint256 netuid) external"
+  {
+    "inputs": [
+      {"internalType": "bytes32", "name": "hotkey", "type": "bytes32"},
+      {"internalType": "uint256", "name": "amount", "type": "uint256"},
+      {"internalType": "uint256", "name": "netuid", "type": "uint256"}
+    ],
+    "name": "addStake",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "bytes32", "name": "hotkey", "type": "bytes32"},
+      {"internalType": "uint256", "name": "amount", "type": "uint256"},
+      {"internalType": "uint256", "name": "netuid", "type": "uint256"}
+    ],
+    "name": "removeStake",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  }
 ];
 
 function showStatus(msg, type = "info") {
@@ -123,7 +146,13 @@ async function connect() {
     contract = new ethers.Contract(addr, ABI, signer);
 
     const userAddr = await signer.getAddress();
-    showStatus("✅ Połączono: " + userAddr, "ok");
+    const network = await provider.getNetwork();
+    showStatus(
+      "✅ Połączono: " + userAddr +
+      "\nSieć: Chain ID " + network.chainId.toString() +
+      (network.chainId.toString() !== "964" ? "\n⚠️ Uwaga: oczekiwano Chain ID 964 (Bittensor)" : " ✅"),
+      "ok"
+    );
   } catch (err) {
     console.error(err);
     showStatus("❌ Błąd połączenia: " + err.message, "err");
@@ -141,7 +170,7 @@ async function doStake(isAdd) {
   const netuidRaw = document.getElementById("netuid").value.trim();
 
   if (!validateHotkey(hotkey)) {
-    showStatus("❌ Hotkey musi być: 0x + 64 znaki hex. Skonwertuj SS58 na ss58.org", "err");
+    showStatus("❌ Hotkey musi być: 0x + 64 znaki hex.\nSkonwertuj SS58 na ss58.org", "err");
     return;
   }
 
@@ -150,7 +179,7 @@ async function doStake(isAdd) {
     amount = BigInt(amountRaw);
     if (amount <= 0n) throw new Error();
   } catch {
-    showStatus("❌ Amount musi być liczbą całkowitą, np. 1000000000", "err");
+    showStatus("❌ Amount musi być liczbą całkowitą np. 1000000000", "err");
     return;
   }
 
@@ -159,7 +188,7 @@ async function doStake(isAdd) {
     netuid = BigInt(netuidRaw);
     if (netuid < 0n) throw new Error();
   } catch {
-    showStatus("❌ NetUID musi być nieujemną liczbą całkowitą, np. 0", "err");
+    showStatus("❌ NetUID musi być nieujemną liczbą całkowitą np. 0", "err");
     return;
   }
 
@@ -170,19 +199,25 @@ async function doStake(isAdd) {
       ? await contract.addStake(hotkey, amount, netuid)
       : await contract.removeStake(hotkey, amount, netuid);
 
-    showStatus("⏳ TX wysłany: " + tx.hash + "\nCzekam na potwierdzenie...", "info");
+    showStatus("⏳ TX wysłany!\nHash: " + tx.hash + "\n\nCzekam na potwierdzenie...", "info");
     console.log("TX hash:", tx.hash);
 
-    await tx.wait();
-    showStatus("✅ " + (isAdd ? "Stake dodany!" : "Stake usunięty!") + "\nTX: " + tx.hash, "ok");
+    const receipt = await tx.wait();
+    showStatus(
+      "✅ " + (isAdd ? "Stake dodany!" : "Stake usunięty!") +
+      "\nTX: " + tx.hash +
+      "\nBlok: " + receipt.blockNumber,
+      "ok"
+    );
   } catch (err) {
-    console.error(err);
+    console.error("FULL ERROR:", JSON.stringify(err, null, 2));
     const msg = err?.info?.error?.message
               || err?.data?.message
               || err?.shortMessage
+              || err?.reason
               || err?.message
               || "Nieznany błąd";
-    showStatus("❌ Błąd: " + msg, "err");
+    showStatus("❌ Błąd: " + msg + "\n\n(Pełny błąd w F12 → Console)", "err");
   }
 }
 
